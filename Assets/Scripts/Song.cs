@@ -6,10 +6,13 @@
  using System.Linq;
  using FridayNightFunkin;
  using Newtonsoft.Json;
+ using QFSW.MOP2;
  using SimpleSpriteAnimator;
  using Slowsharp;
  using TMPro;
  using UnityEngine;
+ using UnityEngine.SceneManagement;
+ using UnityEngine.Serialization;
  using UnityEngine.UI;
  using Debug = UnityEngine.Debug;
  using Random = UnityEngine.Random;
@@ -36,6 +39,8 @@ public class Song : MonoBehaviour
 
 
     [Space] public bool songSetupDone;
+        
+    [Space] public GameObject[] defaultSceneObjects;
 
     [Space] public GameObject ratingObject;
     public GameObject liteRatingObjectP1;
@@ -106,13 +111,21 @@ public class Song : MonoBehaviour
     public Transform player2Down;
     public Transform player2Up;
     public Transform player2Right;
-
+    private List<NoteBehaviour> _noteBehaviours = new List<NoteBehaviour>();
+    
     [Header("Prefabs")] public GameObject leftArrow;
     public GameObject downArrow;
     public GameObject upArrow;
     public GameObject rightArrow;
     [Space] public GameObject holdNote;
     public Sprite holdNoteEnd;
+    public Sprite holdNoteSprite;
+    [Header("Object Pools")] 
+    public ObjectPool leftNotesPool;
+    public ObjectPool rightNotesPool;
+    public ObjectPool downNotesPool;
+    public ObjectPool upNotesPool;
+    public ObjectPool holdNotesPool;
     
     [Header("Characters")]
     public string[] characterNames;
@@ -123,10 +136,10 @@ public class Song : MonoBehaviour
     public SpriteAnimator girlfriendAnimator;
     public bool altDance;
 
-    [Header("Enemy")] public GameObject enemyObj;
+    [FormerlySerializedAs("enemyObj")] [Header("Enemy")] public GameObject opponentObject;
     public Character enemy;
     public string enemyName;
-    public SpriteAnimator enemyAnimator;
+    [FormerlySerializedAs("enemyAnimator")] public SpriteAnimator opponentAnimator;
     public float enemyIdleTimer = .3f;
     private float _currentEnemyIdleTimer;
     public float enemyNoteTimer = .25f;
@@ -137,7 +150,7 @@ public class Song : MonoBehaviour
 
 
 
-    [Header("Boyfriend")] public GameObject bfObj;
+    [FormerlySerializedAs("bfObj")] [Header("Boyfriend")] public GameObject boyfriendObject;
     public SpriteAnimator boyfriendAnimator;
     public float boyfriendIdleTimer = .3f;
     public Sprite boyfriendPortraitNormal;
@@ -148,7 +161,9 @@ public class Song : MonoBehaviour
 
     public static Song instance;
 
-    [Space] public float health = 100;
+    [Header("Scenes")] public Dictionary<string, SceneData> scenes;
+
+    [Header("Health")] public float health = 100;
 
     private const float MAXHealth = 200;
     public float healthLerpSpeed;
@@ -164,6 +179,8 @@ public class Song : MonoBehaviour
     public TMP_Text songDurationText;
     public Image songDurationBar;
 
+    [Space] public GameObject startSongTooltip;
+    
     [Space] public NoteObject lastNote;
     public float stepCrochet;
     public float beatsPerSecond;
@@ -179,12 +196,15 @@ public class Song : MonoBehaviour
     public string songsFolder;
     public string selectedSongDir;
 
+    public static SongMetaV2 currentSongMeta;
+    public static string difficulty;
+    public static int modeOfPlay;
+
     [HideInInspector] public SongListObject selectedSong;
 
 
     public bool songStarted;
 
-    private bool _onlineMode;
     public SubtitleDisplayer subtitleDisplayer;
     public bool usingSubtitles;
 
@@ -214,10 +234,10 @@ public class Song : MonoBehaviour
          *
          * This disables the notes for both players and the UI for the gameplay.
          */
-        player1Notes.gameObject.SetActive(false);
-        player2Notes.gameObject.SetActive(false);
-        battleCanvas.enabled = false;
-        healthBar.SetActive(false);
+        player1Notes.gameObject.SetActive(true);
+        player2Notes.gameObject.SetActive(true);
+        battleCanvas.enabled = true;
+        healthBar.SetActive(true);
 
         mainCamera = Camera.main;
         
@@ -226,22 +246,39 @@ public class Song : MonoBehaviour
          * Grabs the subtitle displayer.
          */
         subtitleDisplayer = GetComponent<SubtitleDisplayer>();
-        
-        /*
-         * Check if the player wants to load with Lite mode.
-         */
-        if (PlayerPrefs.GetInt("Lite Mode", 0) == 1)
-        {
-            Options.LiteMode = true;
-        }
-        
-        
 
+        if (OptionsV2.DesperateMode)
+        {
+            boyfriendObject.SetActive(false);
+            opponentObject.SetActive(false);
+
+            boyfriendHealthIcon.enabled = false;
+            enemyHealthIcon.enabled = false;
+        }
+
+        if (OptionsV2.LiteMode)
+        {
+            girlfriendObject.SetActive(false);
+        }
+
+        if (!OptionsV2.SongDuration)
+            songDurationObject.SetActive(false);
+        else
+        {
+            songDurationObject.SetActive(true);
+            
+            if (OptionsV2.Downscroll)
+            {
+                RectTransform rect = songDurationObject.GetComponent<RectTransform>();
+                
+                rect.anchoredPosition = new Vector3(0,-165,0);
+            }
+        }
         /*
          * In case we want to reset the enemy position later on,
          * we will save their current position.
          */
-        _enemyDefaultPos = enemyObj.transform.position;
+        _enemyDefaultPos = opponentObject.transform.position;
 
         /*
          * We'll make a dictionary of characters via the two arrays of character names
@@ -258,13 +295,44 @@ public class Song : MonoBehaviour
 
 
         _defaultZoom = uiCamera.orthographicSize;
-
         
+        /*
+         * Initialize the required object pools.
+         */
+
+        bool doAuto = false;
+        
+        switch (modeOfPlay)
+        {
+            //Boyfriend
+            case 1:
+                Player.playAsEnemy = false;
+                Player.twoPlayers = false;
+                break;
+            //Opponent
+            case 2:
+                Player.playAsEnemy = true;
+                Player.twoPlayers = false;
+                break;
+            //Local Multiplayer
+            case 3:
+                Player.playAsEnemy = false;
+                Player.twoPlayers = true;
+                break;
+            //Auto
+            case 4:
+                doAuto = true;
+                Player.playAsEnemy = false;
+                Player.twoPlayers = false;
+                break;
+        }
+        
+        PlaySong(doAuto, difficulty,currentSongMeta.songPath);
     }
 
     #region Song Gameplay
 
-    public void PlaySong(bool auto, string directory = "")
+    public void PlaySong(bool auto, string difficulty = "", string directory = "")
     {
         /*
          * If the player wants the song to play itself,
@@ -289,7 +357,7 @@ public class Song : MonoBehaviour
          */
         selectedSongDir = string.IsNullOrWhiteSpace(directory) ? selectedSong.directory : directory;
         
-        jsonDir = selectedSongDir + "/Chart.json";
+        jsonDir = selectedSongDir + $"/Chart-{difficulty.ToLower()}.json";
 
         /*
          * We'll enable the gameplay UI.
@@ -301,10 +369,7 @@ public class Song : MonoBehaviour
         generatingSongMsg.SetActive(true);
 
         menuCanvas.enabled = false;
-        menuScreen.SetActive(true);
         songListScreen.SetActive(false);
-        Menu.instance.chooseSongMsg.SetActive(true);
-        Menu.instance.songDetails.SetActive(false);
         
         /*
          * We'll check and load subtitltes.
@@ -389,13 +454,17 @@ public class Song : MonoBehaviour
         }
     }
 
+    
+    
+    
+    
     public void GenerateSong()
     {
 
-        for (int i = 0; i < Options.instance.colorPickers.Length; i++)
+        for (int i = 0; i < OptionsV2.instance.colorPickers.Length; i++)
         {
-            player1NoteSprites[i].color = Options.instance.colorPickers[i].color;
-            player2NoteSprites[i].color = Options.instance.colorPickers[i].color;
+            player1NoteSprites[i].color = OptionsV2.instance.colorPickers[i].color;
+            player2NoteSprites[i].color = OptionsV2.instance.colorPickers[i].color;
         }
 
         /*
@@ -429,13 +498,11 @@ public class Song : MonoBehaviour
         {
             foreach (List<NoteObject> list in player1NotesObjects)
             {
-                foreach (var t in list)
-                {
-                    Destroy(t.gameObject);
-                }
 
                 list.Clear();
             }
+            
+
 
             player1NotesObjects.Clear();
         }
@@ -444,10 +511,6 @@ public class Song : MonoBehaviour
         {
             foreach (List<NoteObject> list in player2NotesObjects)
             {
-                foreach (var t in list)
-                {
-                    Destroy(t.gameObject);
-                }
 
                 list.Clear();
             }
@@ -455,6 +518,11 @@ public class Song : MonoBehaviour
             player2NotesObjects.Clear();
         }
 
+        leftNotesPool.ReleaseAll();
+        downNotesPool.ReleaseAll();
+        upNotesPool.ReleaseAll();
+        rightNotesPool.ReleaseAll();
+        holdNotesPool.ReleaseAll();
         //GENERATE PLAYER ONE NOTES
         player1NotesObjects = new List<List<NoteObject>>
         {
@@ -482,7 +550,7 @@ public class Song : MonoBehaviour
         /*
          * Shift the UI for downscroll or not
          */
-        if (Options.Downscroll)
+        if (OptionsV2.Downscroll)
         {
             healthBar.GetComponent<RectTransform>().anchoredPosition = new Vector2(0, 140f);
 
@@ -505,7 +573,7 @@ public class Song : MonoBehaviour
          * Shift the UI or not for Middlescroll
          */
         
-        if(Options.Middlescroll)
+        if(OptionsV2.Middlescroll)
         {
             if (!Player.twoPlayers)
             {
@@ -561,206 +629,11 @@ public class Song : MonoBehaviour
          * chart. Then a nested "foreach" allows to go through every notes in that
          * specific section.
          */
-        foreach (FNFSong.FNFSection section in _song.Sections)
-        {
-            foreach (var noteData in section.Notes)
-            {
-                /*
-                 * The .NET FNF Chart parsing library already has something specific
-                 * to tell us if the note is a must hit.
-                 *
-                 * But previously I already kind of reverse engineered the FNF chart
-                 * parsing process so I used the "ConvertToNote" function in the .NET
-                 * library to grab "note data".
-                 */
-                GameObject newNoteObj;
-                List<decimal> data = noteData.ConvertToNote();
-
-                /*
-                 * It sets the "must hit note" boolean depending if the note
-                 * is in a section focusing on the boyfriend or not, and
-                 * if the note is for the other section.
-                 */
-                bool mustHitNote = section.MustHitSection;
-                if (data[1] > 3)
-                    mustHitNote = !section.MustHitSection;
-                int noteType = Convert.ToInt32(data[1] % 4);
-
-                /*
-                 * We make a spawn pos variable to later set the spawn
-                 * point of this note.
-                 */
-                Vector3 spawnPos;
-
-                /*
-                 * We get the length of this note's hold length.
-                 */
-                float susLength = (float) data[2];
-
-                /*
-                if (susLength > 0)
-                {
-                    isSusNote = true;
-                    
-                }
-                */
-
-                /*
-                 * Then we adjust it to fit the step crochet to get the TRUE
-                 * hold length.
-                 */
-                susLength = susLength / stepCrochet;
-                print("Sus length is " + susLength);
-
-                /*
-                 * It checks the type of note this is and spawns in a note gameobject
-                 * tailored for it then sets the spawn point for it depending on if it's
-                 * a note belonging to player 1 or player 2.
-                 *
-                 * If somehow this is the wrong data type, it fails and stops the song generation.
-                 */
-                switch (noteType)
-                {
-                    case 0: //Left
-                        newNoteObj = Instantiate(leftArrow);
-                        spawnPos = mustHitNote ? player1Left.position : player2Left.position;
-                        break;
-                    case 1: //Down
-                        newNoteObj = Instantiate(downArrow);
-                        spawnPos = mustHitNote ? player1Down.position : player2Down.position;
-                        break;
-                    case 2: //Up
-                        newNoteObj = Instantiate(upArrow);
-                        spawnPos = mustHitNote ? player1Up.position : player2Up.position;
-                        break;
-                    case 3: //Right
-                        newNoteObj = Instantiate(rightArrow);
-                        spawnPos = mustHitNote ? player1Right.position : player2Right.position;
-                        break;
-                    default:
-                        Debug.LogError("Invalid note data.");
-                        return;
-                }
-
-                /*
-                 * We then move the note to a specific position in the game world.
-                 */
-                spawnPos += Vector3.down *
-                            (Convert.ToSingle(data[0] / (decimal) notesOffset) + (_song.Speed * noteDelay));
-                spawnPos.y -= (_song.Bpm / 60) * startSound.length * _song.Speed;
-                newNoteObj.transform.position = spawnPos;
-                //newNoteObj.transform.position += Vector3.down * Convert.ToSingle(secNoteData[0] / notesOffset);
-
-                /*
-                 * Each note gameobject has a special component named "NoteObject".
-                 * It controls the note's movement based on the data provided.
-                 * It also allows Player 2 to hit their notes.
-                 *
-                 * Below we set this note's component data. Simple.
-                 *
-                 * DummyNote is always false if generated via a JSON.
-                 */
-                NoteObject nObj = newNoteObj.GetComponent<NoteObject>();
-
-                nObj.ScrollSpeed = -_song.Speed;
-                nObj.strumTime = (float) data[0];
-                nObj.type = noteType;
-                nObj.mustHit = mustHitNote;
-                nObj.dummyNote = false;
-                nObj.layer = section.MustHitSection ? 1 : 2;
-
-                /*
-                 * We add this new note to a list of either player 1's notes
-                 * or player 2's notes, depending on who it belongs to.
-                 */
-                if (mustHitNote)
-                    player1NotesObjects[noteType].Add(nObj);
-                else
-                    player2NotesObjects[noteType].Add(nObj);
-
-                /*
-                 * This below is for hold notes generation. It tells the future
-                 * hold note what the previous note is.
-                 */
-                lastNote = nObj;
-                /*
-                 * Now we generate hold notes depending on this note's hold length.
-                 * The generation of hold notes is more or less the same as normal
-                 * notes. Hold notes, though, use a different gameobject as it's not
-                 * a normal note.
-                 *
-                 * If there's nothing, we skip.
-                 */
-                for (int i = 0; i < Math.Floor(susLength); i++)
-                {
-                    GameObject newSusNoteObj;
-                    Vector3 susSpawnPos;
-
-                    bool setAsLastSus = false;
-
-                    /*
-                     * Math.floor returns the largest integer less than or equal to a given number.
-                     *
-                     * I uh... have no clue why this is needed or what it does but we need this
-                     * in or else it won't do hold notes right so...
-                     */
-                    newSusNoteObj = Instantiate(holdNote);
-                    if ((i + 1) == Math.Floor(susLength))
-                    {
-                        newSusNoteObj.GetComponent<SpriteRenderer>().sprite = holdNoteEnd;
-                        setAsLastSus = true;
-                    }
-
-                    switch (noteType)
-                    {
-                        case 0: //Left
-                            susSpawnPos = mustHitNote ? player1Left.position : player2Left.position;
-                            break;
-                        case 1: //Down
-                            susSpawnPos = mustHitNote ? player1Down.position : player2Down.position;
-                            break;
-                        case 2: //Up
-                            susSpawnPos = mustHitNote ? player1Up.position : player2Up.position;
-                            break;
-                        case 3: //Right
-                            susSpawnPos = mustHitNote ? player1Right.position : player2Right.position;
-                            break;
-                        default:
-                            susSpawnPos = mustHitNote ? player1Left.position : player2Left.position;
-                            break;
-                    }
-                    
-
-                    susSpawnPos += Vector3.down *
-                                   (Convert.ToSingle(data[0] / (decimal) notesOffset) + (_song.Speed * noteDelay));
-                    susSpawnPos.y -= (_song.Bpm / 60) * startSound.length * _song.Speed;
-                    newSusNoteObj.transform.position = susSpawnPos;
-                    NoteObject susObj = newSusNoteObj.GetComponent<NoteObject>();
-                    susObj.type = noteType;
-                    susObj.ScrollSpeed = -_song.Speed;
-                    susObj.mustHit = mustHitNote;
-                    susObj.strumTime = (float) data[0] + (stepCrochet * i) + stepCrochet;
-                    susObj.susNote = true;
-                    susObj.dummyNote = false;
-                    susObj.lastSusNote = setAsLastSus;
-                    susObj.layer = section.MustHitSection ? 1 : 2;
-                    susObj.GenerateHold(lastNote);
-                    if (mustHitNote)
-                        player1NotesObjects[noteType].Add(susObj);
-                    else
-                        player2NotesObjects[noteType].Add(susObj);
-                    lastNote = susObj;
-                }
-
-
-
-
-
+        foreach ( FNFSong.FNFSection section in _song.Sections ) {
+            foreach ( var noteData in section.Notes ) {
+                _noteBehaviours.Add( new NoteBehaviour( section, noteData ) );
             }
-
-
         }
-
         /*
          * Charts tend to not have organized notes, so we have to sort notes
          * for the game so inputs do not get screwed up.
@@ -811,16 +684,10 @@ public class Song : MonoBehaviour
          * Stops any current music playing and sets it to not loop.
          */
         musicSources[0].loop = false;
-        musicSources[0].volume = Options.instVolume;
+        musicSources[0].volume = OptionsV2.instVolume;
         musicSources[0].Stop();
 
-        /*
-         * Start the countdown audio.
-         *
-         * Unlike FNF, this does not dynamically change based on BPM.
-         */
-        soundSource.clip = startSound;
-        soundSource.Play();
+       
 
         /*
          * Disable the entire Menu UI and enable the entire Gameplay UI.
@@ -836,11 +703,11 @@ public class Song : MonoBehaviour
          * If not, keep any existing character we selected.
          */
 
-        print("Checking for and applying " + _song.Player2 +". Result is " + charactersDictionary.ContainsKey(_song.Player2));
-        if (charactersDictionary.ContainsKey(_song.Player2))
+        print("Checking for and applying " + _song.Player2 +". Result is " + Cache.cachedOpponents.ContainsKey(_song.Player2));
+        if (Cache.cachedOpponents.ContainsKey(_song.Player2))
         {
-            enemy = charactersDictionary[_song.Player2];
-            enemyAnimator.spriteAnimations = enemy.animations;
+            enemy = Cache.cachedOpponents[_song.Player2];
+            opponentAnimator.spriteAnimations = enemy.animations;
 
             /*
              * Yes, opponents can float if enabled in their
@@ -848,7 +715,7 @@ public class Song : MonoBehaviour
              */
             if (enemy.doesFloat)
             {
-                _enemyFloat = LeanTween.moveLocalY(enemyObj, enemy.floatToOffset, enemy.floatSpeed).setEaseInOutExpo()
+                _enemyFloat = LeanTween.moveLocalY(opponentObject, enemy.floatToOffset, enemy.floatSpeed).setEaseInOutExpo()
                     .setLoopPingPong();
             }
             else
@@ -860,12 +727,20 @@ public class Song : MonoBehaviour
                 if (_enemyFloat != null && LeanTween.isTweening(_enemyFloat.id))
                 {
                     LeanTween.cancel(_enemyFloat.id);
-                    enemyObj.transform.position = _enemyDefaultPos;
+                    opponentObject.transform.position = _enemyDefaultPos;
                 }
             }
 
             enemyHealthIcon.sprite = enemy.portrait;
             enemyHealthIconRect.sizeDelta = enemy.portraitSize;
+            
+            Vector3 offset = enemy.cameraOffset;
+            offset.z = -10;
+            enemy.cameraOffset = offset;
+
+            EnemyPlayAnimation("Idle");
+            
+            opponentAnimator.transform.localScale = new Vector2(enemy.scale, enemy.scale);
 
             CameraMovement.instance.playerTwoOffset = enemy.cameraOffset;
         }
@@ -876,7 +751,7 @@ public class Song : MonoBehaviour
 
             if (Directory.Exists(charDir))
             {
-                enemyAnimator.spriteAnimations = new List<SpriteAnimation>();
+                opponentAnimator.spriteAnimations = new List<SpriteAnimation>();
 
                 // BEGIN ANIMATIONS IMPORT
 
@@ -885,26 +760,132 @@ public class Song : MonoBehaviour
                     ? JsonConvert.DeserializeObject<CharacterMeta>(File.ReadAllText(charMetaPath))
                     : null;
 
+                foreach (string directoryPath in Directory.GetDirectories(charDir))
+                {
+                    DirectoryInfo directoryInfo = new DirectoryInfo(directoryPath);
+
+                    var files = directoryInfo.GetFiles("*.png");
+
+                    List<Sprite> sprites = new List<Sprite>();
+
+                    foreach (var file in files)
+                    {
+                        byte[] imageData = File.ReadAllBytes(file.ToString());
+
+                        Texture2D imageTexture = new Texture2D(2, 2);
+                        imageTexture.LoadImage(imageData);
+
+                        var sprite = Sprite.Create(imageTexture,
+                            new Rect(0, 0, imageTexture.width, imageTexture.height), new Vector2(0.5f, 0.0f), 100);
+                        sprites.Add(sprite);
+
+                    }
+
+                    CharacterAnimations.Add(directoryInfo.Name, sprites);
+                }
+
+                foreach (string animationName in CharacterAnimations.Keys)
+                {
+                    List<Vector2> offsets = new List<Vector2>();
+                    SpriteAnimation newAnimation = ScriptableObject.CreateInstance<SpriteAnimation>();
+                    List<SpriteAnimationFrame> frames = new List<SpriteAnimationFrame>();
+                    for (var index = 0; index < CharacterAnimations[animationName].Count; index++)
+                    {
+                        Sprite sprite = CharacterAnimations[animationName][index];
+                        Vector2 animationOffset = Vector2.zero;
+                        if (currentMeta != null)
+                        {
+                            if (currentMeta.Offsets.ContainsKey(animationName))
+                            {
+                                animationOffset = currentMeta.Offsets[animationName][index];
+                            }
+                        }
+                        else
+                        {
+                            offsets.Add(animationOffset);
+                        }
+
+                        SpriteAnimationFrame newFrame = new SpriteAnimationFrame
+                        {
+                            Sprite = sprite,
+                            Offset = animationOffset
+                        };
+
+                        frames.Add(newFrame);
+                    }
+
+                    newAnimation.Frames = frames;
+                    newAnimation.Name = animationName;
+                    newAnimation.FPS = 24;
+                    newAnimation.SpriteAnimationType = SpriteAnimationType.PlayOnce;
+
+                    opponentAnimator.spriteAnimations.Add(newAnimation);
+
+                }
+
+                Character newCharacter = ScriptableObject.CreateInstance<Character>();
+                newCharacter = currentMeta.Character;
+                if (File.Exists(charDir + "/Portrait.png"))
+                {
+                    byte[] portraitFile = File.ReadAllBytes(charDir + "/Portrait.png");
+                    Texture2D newTexture = new Texture2D(5, 5);
+                    newTexture.LoadImage(portraitFile);
+                    newCharacter.portrait = Sprite.Create(newTexture,
+                        new Rect(0, 0, newTexture.width, newTexture.height),
+                        Vector2.zero);
+                }
+                else
+                {
+                    newCharacter.portrait = defaultEnemy.portrait;
+                }
+
+                if (File.Exists(charDir + "/Dead Portrait.png"))
+                {
+                    byte[] portraitFile = File.ReadAllBytes(charDir + "/Dead Portrait.png");
+                    Texture2D newTexture = new Texture2D(5, 5);
+                    newTexture.LoadImage(portraitFile);
+                    newCharacter.portraitDead = Sprite.Create(newTexture,
+                        new Rect(0, 0, newTexture.width, newTexture.height),
+                        Vector2.zero);
+                }
+                else
+                {
+                    newCharacter.portraitDead = defaultEnemy.portraitDead;
+                }
+
+
+
+                enemy = newCharacter;
+
+                opponentAnimator.transform.localScale = new Vector2(newCharacter.scale, newCharacter.scale);
+
+                enemyHealthIcon.sprite = enemy.portrait;
+                enemyHealthIconRect.sizeDelta = enemy.portraitSize;
+
+                Vector3 offset = enemy.cameraOffset;
+                offset.z = -10;
+                enemy.cameraOffset = offset;
+
+                EnemyPlayAnimation("Idle");
+                    
+                CameraMovement.instance.playerTwoOffset = enemy.cameraOffset;
+                newCharacter.animations = opponentAnimator.spriteAnimations;
+                Cache.cachedOpponents.Add(_song.Player2, newCharacter);
+
+                /*
                 if (charactersDictionary.ContainsKey(currentMeta.Character.name))
                 {
                     enemy = charactersDictionary[currentMeta.Character.name];
                     enemyAnimator.spriteAnimations = enemy.animations;
                     
-                    /*
-                    * Yes, opponents can float if enabled in their
-                    * configuration file.
-                    */
-                    if (enemy.doesFloat)
+                    enemy.doesFloat)
                     {
                         _enemyFloat = LeanTween.moveLocalY(enemyObj, enemy.floatToOffset, enemy.floatSpeed).setEaseInOutExpo()
                             .setLoopPingPong();
                     }
                     else
                     {
-                        /*
-                         * In case any previous enemy floated before and this new one does not,
-                         * we reset their position and cancel the floating tween.
-                         */
+                         
                         if (_enemyFloat != null && LeanTween.isTweening(_enemyFloat.id))
                         {
                             LeanTween.cancel(_enemyFloat.id);
@@ -920,113 +901,74 @@ public class Song : MonoBehaviour
                 else
                 {
 
-                    foreach (string directoryPath in Directory.GetDirectories(charDir))
-                    {
-                        DirectoryInfo directoryInfo = new DirectoryInfo(directoryPath);
-
-                        var files = directoryInfo.GetFiles("*.png");
-
-                        List<Sprite> sprites = new List<Sprite>();
-
-                        foreach (var file in files)
-                        {
-                            byte[] imageData = File.ReadAllBytes(file.ToString());
-
-                            Texture2D imageTexture = new Texture2D(2, 2);
-                            imageTexture.LoadImage(imageData);
-
-                            var sprite = Sprite.Create(imageTexture,
-                                new Rect(0, 0, imageTexture.width, imageTexture.height), new Vector2(0.5f, 0.0f), 100);
-                            sprites.Add(sprite);
-
-                        }
-
-                        CharacterAnimations.Add(directoryInfo.Name, sprites);
-                    }
-
-                    foreach (string animationName in CharacterAnimations.Keys)
-                    {
-                        List<Vector2> offsets = new List<Vector2>();
-                        SpriteAnimation newAnimation = ScriptableObject.CreateInstance<SpriteAnimation>();
-                        List<SpriteAnimationFrame> frames = new List<SpriteAnimationFrame>();
-                        for (var index = 0; index < CharacterAnimations[animationName].Count; index++)
-                        {
-                            Sprite sprite = CharacterAnimations[animationName][index];
-                            Vector2 animationOffset = Vector2.zero;
-                            if (currentMeta != null)
-                            {
-                                if (currentMeta.Offsets.ContainsKey(animationName))
-                                {
-                                    animationOffset = currentMeta.Offsets[animationName][index];
-                                }
-                            }
-                            else
-                            {
-                                offsets.Add(animationOffset);
-                            }
-
-                            SpriteAnimationFrame newFrame = new SpriteAnimationFrame
-                            {
-                                Sprite = sprite,
-                                Offset = animationOffset
-                            };
-
-                            frames.Add(newFrame);
-                        }
-
-                        newAnimation.Frames = frames;
-                        newAnimation.Name = animationName;
-                        newAnimation.FPS = 24;
-                        newAnimation.SpriteAnimationType = SpriteAnimationType.PlayOnce;
-
-                        enemyAnimator.spriteAnimations.Add(newAnimation);
-
-                    }
-
-                    Character newCharacter = ScriptableObject.CreateInstance<Character>();
-                    newCharacter = currentMeta.Character;
-                    if (File.Exists(charDir + "/Portrait.png"))
-                    {
-                        byte[] portraitFile = File.ReadAllBytes(charDir + "/Portrait.png");
-                        Texture2D newTexture = new Texture2D(5, 5);
-                        newTexture.LoadImage(portraitFile);
-                        newCharacter.portrait = Sprite.Create(newTexture,
-                            new Rect(0, 0, newTexture.width, newTexture.height),
-                            Vector2.zero);
-                    }
-                    else
-                    {
-                        newCharacter.portrait = defaultEnemy.portrait;
-                    }
-
-                    if (File.Exists(charDir + "/Dead Portrait.png"))
-                    {
-                        byte[] portraitFile = File.ReadAllBytes(charDir + "/Dead Portrait.png");
-                        Texture2D newTexture = new Texture2D(5, 5);
-                        newTexture.LoadImage(portraitFile);
-                        newCharacter.portraitDead = Sprite.Create(newTexture,
-                            new Rect(0, 0, newTexture.width, newTexture.height),
-                            Vector2.zero);
-                    }
-                    else
-                    {
-                        newCharacter.portraitDead = defaultEnemy.portraitDead;
-                    }
-
-
-
-                    charactersDictionary.Add(newCharacter.characterName, newCharacter);
-                    enemy = newCharacter;
-
-                    enemyHealthIcon.sprite = enemy.portrait;
-                    enemyHealthIconRect.sizeDelta = enemy.portraitSize;
-
-                    Vector3 offset = enemy.cameraOffset;
-                    offset.z = -10;
-                    enemy.cameraOffset = offset;
                     
-                    CameraMovement.instance.playerTwoOffset = enemy.cameraOffset;
                 }
+                */
+            }
+        }
+
+        string sceneDir = selectedSongDir + "/Scene";
+        if (Directory.Exists(sceneDir))
+        {
+            SceneData data = JsonConvert.DeserializeObject<SceneData>(File.ReadAllText(sceneDir + "/scene.json"));
+
+            if (data != null)
+            {
+                if(!Cache.cachedScenes.ContainsKey(data.sceneName))
+                {
+                    string imagesDirectory = sceneDir + "/images";
+                    if (Directory.Exists(imagesDirectory))
+                    {
+                        Dictionary<SceneObject, Sprite> sprites = new Dictionary<SceneObject, Sprite>();
+                        foreach (SceneObject sceneObject in data.objects)
+                        {
+                            string path = imagesDirectory + "/" + sceneObject.fileName;
+                            if (File.Exists(path))
+                            {
+                                byte[] imageData = File.ReadAllBytes(path);
+
+
+                                Texture2D imageTexture = new Texture2D(2, 2);
+                                imageTexture.LoadImage(imageData);
+
+                                GameObject newImage = new GameObject();
+                                SpriteRenderer renderer = newImage.AddComponent<SpriteRenderer>();
+                                Sprite newSprite = Sprite.Create(imageTexture,
+                                    new Rect(0, 0, imageTexture.width, imageTexture.height), Vector2.zero, 100);
+                                renderer.sprite = newSprite;
+                                renderer.sortingOrder = sceneObject.layer;
+                                newImage.name = Path.GetFileName(path);
+
+                                newImage.transform.position = sceneObject.position;
+                                newImage.transform.localScale = sceneObject.size;
+                                newImage.transform.rotation = sceneObject.rotation;
+
+                                sprites.Add(sceneObject, newSprite);
+                            }
+                        }
+
+                        Cache.cachedScenes.Add(data.sceneName, sprites);
+                    }
+                }
+                else
+                {
+                    Dictionary<SceneObject, Sprite> sceneObjectsCache = Cache.cachedScenes[data.sceneName];
+
+                    foreach (SceneObject sceneObject in sceneObjectsCache.Keys)
+                    {
+                        GameObject newImage = new GameObject();
+                        SpriteRenderer renderer = newImage.AddComponent<SpriteRenderer>();
+                        renderer.sprite = sceneObjectsCache[sceneObject];
+                        renderer.sortingOrder = sceneObject.layer;
+                        newImage.name = sceneObject.fileName;
+
+                        newImage.transform.position = sceneObject.position;
+                        newImage.transform.localScale = sceneObject.size;
+                        newImage.transform.rotation = sceneObject.rotation;
+                    }
+                }
+
+                foreach (GameObject sceneObject in defaultSceneObjects) Destroy(sceneObject);
             }
         }
 
@@ -1039,16 +981,18 @@ public class Song : MonoBehaviour
 
             
         }
+        if(OptionsV2.SongDuration)
+        {
+            float time = musicClip.length - musicSources[0].time;
 
-        float time = musicClip.length - musicSources[0].time;
+            int seconds = (int) (time % 60); // return the remainder of the seconds divide by 60 as an int
+            time /= 60; // divide current time y 60 to get minutes
+            int minutes = (int) (time % 60); //return the remainder of the minutes divide by 60 as an int
 
-        int seconds = (int)(time % 60); // return the remainder of the seconds divide by 60 as an int
-        time /= 60; // divide current time y 60 to get minutes
-        int minutes = (int)(time % 60); //return the remainder of the minutes divide by 60 as an int
+            songDurationText.text = minutes + ":" + seconds.ToString("00");
 
-        songDurationText.text = minutes + ":" + seconds.ToString("00");
-
-        songDurationBar.fillAmount = 0;
+            songDurationBar.fillAmount = 0;
+        }
 
         mainCamera.enabled = true;
         uiCamera.enabled = true;
@@ -1058,6 +1002,8 @@ public class Song : MonoBehaviour
         StartCoroutine(nameof(SongStart), startSound.length);
     }
 
+    
+    
     IEnumerator SongStart(float delay)
     {
         /*
@@ -1071,12 +1017,24 @@ public class Song : MonoBehaviour
                 Directory.Delete(Application.persistentDataPath + "/tmp");
         }
 
+        startSongTooltip.SetActive(true);
+        startSongTooltip.GetComponentInChildren<TMP_Text>().text = $"Press {Player.startSongKey} to start the song.";
+        yield return new WaitUntil(() => Input.GetKeyDown(KeyCode.Space));
+        startSongTooltip.SetActive(false);
+        /*
+        * Start the countdown audio.
+        *
+        * Unlike FNF, this does not dynamically change based on BPM.
+        */
+        soundSource.clip = startSound;
+        soundSource.Play();
+        
         /*
          * Wait for the countdown to finish.
          */
         yield return new WaitForSeconds(delay);
 
-        if(!Options.LiteMode)
+        if(!OptionsV2.LiteMode)
             mainCamera.orthographicSize = 4;
         
         /*
@@ -1134,15 +1092,203 @@ public class Song : MonoBehaviour
 
 
     }
+    
+    
+    public void GenNote( FNFSong.FNFSection section, List<decimal> note ) {
+        /*
+                 * The .NET FNF Chart parsing library already has something specific
+                 * to tell us if the note is a must hit.
+                 *
+                 * But previously I already kind of reverse engineered the FNF chart
+                 * parsing process so I used the "ConvertToNote" function in the .NET
+                 * library to grab "note data".
+                 */
+        GameObject newNoteObj;
+        List<decimal> data = note;
+
+        /*
+         * It sets the "must hit note" boolean depending if the note
+         * is in a section focusing on the boyfriend or not, and
+         * if the note is for the other section.
+         */
+        bool mustHitNote = section.MustHitSection;
+        if ( data[ 1 ] > 3 )
+            mustHitNote = !section.MustHitSection;
+        int noteType = Convert.ToInt32( data[ 1 ] % 4 );
+
+        /*
+         * We make a spawn pos variable to later set the spawn
+         * point of this note.
+         */
+        Vector3 spawnPos;
+
+        /*
+         * We get the length of this note's hold length.
+         */
+        float susLength = (float)data[ 2 ];
+
+        /*
+        if (susLength > 0)
+        {
+            isSusNote = true;
+
+        }
+        */
+
+        /*
+         * Then we adjust it to fit the step crochet to get the TRUE
+         * hold length.
+         */
+        susLength /= stepCrochet;
+        print( "Sus length is " + susLength );
+
+        /*
+         * It checks the type of note this is and spawns in a note gameobject
+         * tailored for it then sets the spawn point for it depending on if it's
+         * a note belonging to player 1 or player 2.
+         *
+         * If somehow this is the wrong data type, it fails and stops the song generation.
+         */
+        switch ( noteType ) {
+            case 0: //Left
+                newNoteObj = leftNotesPool.GetObject();
+                spawnPos = mustHitNote ? player1Left.position : player2Left.position;
+                break;
+            case 1: //Down
+                newNoteObj = downNotesPool.GetObject();
+                spawnPos = mustHitNote ? player1Down.position : player2Down.position;
+                break;
+            case 2: //Up
+                newNoteObj = upNotesPool.GetObject();
+                spawnPos = mustHitNote ? player1Up.position : player2Up.position;
+                break;
+            case 3: //Right
+                newNoteObj = rightNotesPool.GetObject();
+                spawnPos = mustHitNote ? player1Right.position : player2Right.position;
+                break;
+            default:
+                Debug.LogError( "Invalid note data." );
+                return;
+        }
+
+        /*
+         * We then move the note to a specific position in the game world.
+         */
+        spawnPos += Vector3.down *
+                    ( Convert.ToSingle( data[ 0 ] / (decimal)notesOffset ) + ( _song.Speed * noteDelay ) );
+        spawnPos.y -= ( _song.Bpm / 60 ) * startSound.length * _song.Speed;
+        newNoteObj.transform.position = spawnPos;
+        //newNoteObj.transform.position += Vector3.down * Convert.ToSingle(secNoteData[0] / notesOffset);
+
+        /*
+         * Each note gameobject has a special component named "NoteObject".
+         * It controls the note's movement based on the data provided.
+         * It also allows Player 2 to hit their notes.
+         *
+         * Below we set this note's component data. Simple.
+         *
+         * DummyNote is always false if generated via a JSON.
+         */
+        NoteObject nObj = newNoteObj.GetComponent<NoteObject>( );
+
+        nObj.ScrollSpeed = -_song.Speed;
+        nObj.strumTime = (float)data[ 0 ];
+        nObj.type = noteType;
+        nObj.mustHit = mustHitNote;
+        nObj.dummyNote = false;
+        nObj.layer = section.MustHitSection ? 1 : 2;
+
+        /*
+         * We add this new note to a list of either player 1's notes
+         * or player 2's notes, depending on who it belongs to.
+         */
+        if ( mustHitNote )
+            player1NotesObjects[ noteType ].Add( nObj );
+        else
+            player2NotesObjects[ noteType ].Add( nObj );
+
+        /*
+         * This below is for hold notes generation. It tells the future
+         * hold note what the previous note is.
+         */
+        lastNote = nObj;
+        /*
+         * Now we generate hold notes depending on this note's hold length.
+         * The generation of hold notes is more or less the same as normal
+         * notes. Hold notes, though, use a different gameobject as it's not
+         * a normal note.
+         *
+         * If there's nothing, we skip.
+         */
+        for ( int i = 0; i < Math.Floor( susLength ); i++ ) {
+            GameObject newSusNoteObj;
+            Vector3 susSpawnPos;
+
+            bool setAsLastSus = false;
+
+            /*
+             * Math.floor returns the largest integer less than or equal to a given number.
+             *
+             * I uh... have no clue why this is needed or what it does but we need this
+             * in or else it won't do hold notes right so...
+             */
+            newSusNoteObj = holdNotesPool.GetObject();
+            if ( ( i + 1 ) == Math.Floor( susLength ) ) {
+                newSusNoteObj.GetComponent<SpriteRenderer>( ).sprite = holdNoteEnd;
+                setAsLastSus = true;
+            }
+            else
+            {
+                setAsLastSus = false;
+                newSusNoteObj.GetComponent<SpriteRenderer>().sprite = holdNoteSprite;
+            }
+
+            switch ( noteType ) {
+                case 0: //Left
+                    susSpawnPos = mustHitNote ? player1Left.position : player2Left.position;
+                    break;
+                case 1: //Down
+                    susSpawnPos = mustHitNote ? player1Down.position : player2Down.position;
+                    break;
+                case 2: //Up
+                    susSpawnPos = mustHitNote ? player1Up.position : player2Up.position;
+                    break;
+                case 3: //Right
+                    susSpawnPos = mustHitNote ? player1Right.position : player2Right.position;
+                    break;
+                default:
+                    susSpawnPos = mustHitNote ? player1Left.position : player2Left.position;
+                    break;
+            }
+
+
+            susSpawnPos += Vector3.down *
+                           ( Convert.ToSingle( data[ 0 ] / (decimal)notesOffset ) + ( _song.Speed * noteDelay ) );
+            susSpawnPos.y -= ( _song.Bpm / 60 ) * startSound.length * _song.Speed;
+            newSusNoteObj.transform.position = susSpawnPos;
+            NoteObject susObj = newSusNoteObj.GetComponent<NoteObject>( );
+            susObj.type = noteType;
+            susObj.ScrollSpeed = -_song.Speed;
+            susObj.mustHit = mustHitNote;
+            susObj.strumTime = (float)data[ 0 ] + ( stepCrochet * i ) + stepCrochet;
+            susObj.susNote = true;
+            susObj.dummyNote = false;
+            susObj.lastSusNote = setAsLastSus;
+            susObj.layer = section.MustHitSection ? 1 : 2;
+            susObj.GenerateHold( lastNote );
+            if ( mustHitNote )
+                player1NotesObjects[ noteType ].Add( susObj );
+            else
+                player2NotesObjects[ noteType ].Add( susObj );
+            lastNote = susObj;
+        }
+    }
+    
 
     #region Pause Menu
     public void PauseSong()
     {
-        if (Options.instance.isTesting)
-        {
-            subtitleDisplayer.StopSubtitles();
-            return;
-        }
+        
 
         subtitleDisplayer.paused = true;
         
@@ -1181,7 +1327,7 @@ public class Song : MonoBehaviour
     public void RestartSong()
     {
         subtitleDisplayer.StopSubtitles();
-        PlaySong(false);
+        PlaySong(false,difficulty,currentSongMeta.songPath);
         Pause.instance.pauseScreen.SetActive(false);
     }
 
@@ -1212,13 +1358,14 @@ public class Song : MonoBehaviour
 
     public void EnemyPlayAnimation(string animationName)
     {
-        if (enemy.idleOnly) return;
-        enemyAnimator.Play(animationName);
+        if (enemy.idleOnly || OptionsV2.DesperateMode) return;
+        opponentAnimator.Play(animationName);
         _currentEnemyIdleTimer = enemyIdleTimer;
     }
 
     private void BoyfriendPlayAnimation(string animationName)
     {
+        if (OptionsV2.DesperateMode) return;
         boyfriendAnimator.Play("BF " + animationName);
 
         
@@ -1431,20 +1578,20 @@ public class Song : MonoBehaviour
 
             float yPos = note.transform.position.y;
 
-            var newRatingObject = !Options.LiteMode ? Instantiate(ratingObject) : liteRatingObjectP1;
-            Vector3 ratingPos = newRatingObject.transform.position;
-
-            if (Options.LiteMode & player == 2)
+            var newRatingObject = !OptionsV2.LiteMode ? Instantiate(ratingObject) : liteRatingObjectP1;
+            Vector3 ratingPos = new Vector3(1, 1, 0);
+            newRatingObject.transform.position = ratingPos;
+            if (OptionsV2.LiteMode & player == 2)
             {
                 newRatingObject = liteRatingObjectP2;
                 ratingPos = newRatingObject.transform.position;
             }
             
-            ratingPos.y = Options.Downscroll ? 6 : 1;
+            ratingPos.y = OptionsV2.Downscroll ? 6 : 1;
             if (player == 2)
             {
                 
-                if (!Options.LiteMode)
+                if (!OptionsV2.LiteMode)
                 {
                     ratingPos.x = -ratingPos.x;
                 }
@@ -1454,7 +1601,7 @@ public class Song : MonoBehaviour
 
             var ratingObjectScript = newRatingObject.GetComponent<RatingObject>();
 
-            if (Options.LiteMode)
+            if (OptionsV2.LiteMode)
             {
                 ratingObjectScript.liteTimer = 2.15f;
             }
@@ -1482,6 +1629,11 @@ public class Song : MonoBehaviour
                 rating = Rating.Good;
             }
             else
+            {
+                rating = Rating.Sick;
+            }
+
+            if (Player.demoMode)
             {
                 rating = Rating.Sick;
             }
@@ -1607,7 +1759,28 @@ public class Song : MonoBehaviour
             player2NotesObjects[noteType].Remove(note);
         }
 
-        Destroy(note.gameObject);
+        if (note.susNote)
+        {
+            holdNotesPool.Release(note.gameObject);
+        } else
+        {
+
+            switch (note.type)
+            {
+                case 0:
+                    leftNotesPool.Release(note.gameObject);
+                    break;
+                case 1:
+                    downNotesPool.Release(note.gameObject);
+                    break;
+                case 2:
+                    upNotesPool.Release(note.gameObject);
+                    break;
+                case 3:
+                    rightNotesPool.Release(note.gameObject);
+                    break;
+            }
+        }
 
     }
 
@@ -1717,17 +1890,27 @@ public class Song : MonoBehaviour
         if (songSetupDone)
         {
             modInstance?.Invoke("Update");
-            if (songStarted)
+            
+            if ( _noteBehaviours.Count > 0)
+                foreach (NoteBehaviour nBeh in _noteBehaviours)
+                    if (nBeh.count < 1)
+                        nBeh.GenerateNote();
+            
+            if (songStarted & musicSources[0].isPlaying)
             {
-                float t = musicClip.length - musicSources[0].time;
+                
+                if(OptionsV2.SongDuration)
+                {
+                    float t = musicClip.length - musicSources[0].time;
 
-                int seconds = (int)(t % 60); // return the remainder of the seconds divide by 60 as an int
-                t /= 60; // divide current time y 60 to get minutes
-                int minutes = (int)(t % 60); //return the remainder of the minutes divide by 60 as an int
+                    int seconds = (int) (t % 60); // return the remainder of the seconds divide by 60 as an int
+                    t /= 60; // divide current time y 60 to get minutes
+                    int minutes = (int) (t % 60); //return the remainder of the minutes divide by 60 as an int
 
-                songDurationText.text = minutes + ":" + seconds.ToString("00");
+                    songDurationText.text = minutes + ":" + seconds.ToString("00");
 
-                songDurationBar.fillAmount = musicSources[0].time / musicClip.length;
+                    songDurationBar.fillAmount = musicSources[0].time / musicClip.length;
+                }
                 if ((float)beatStopwatch.ElapsedMilliseconds / 1000 >= beatsPerSecond)
                 {
                     beatStopwatch.Restart();
@@ -1741,48 +1924,48 @@ public class Song : MonoBehaviour
 
                     if (_currentEnemyIdleTimer <= 0 & currentBeat % 2 == 0)
                     {
-                        enemyAnimator.Play("Idle");
+                        opponentAnimator.Play("Idle");
                     }
 
                     
                     
-                    if (Options.LiteMode) return;
-                    
-                    if (altDance)
+                    if (!OptionsV2.LiteMode)
                     {
-                        girlfriendAnimator.Play("GF Dance Left");
-                        altDance = false;
-                    }
-                    else
-                    {
-                        girlfriendAnimator.Play("GF Dance Right");
-                        altDance = true;
-                    }
-                    
-                    if (!_portraitsZooming)
-                    {
-                        _portraitsZooming = true;
-                        LeanTween.value(1.25f, 1, .15f).setOnComplete(() =>
-                        {
-                            _portraitsZooming = false;
-                        }).setOnUpdate(f =>
-                        {
-                            boyfriendHealthIconRect.localScale = new Vector3(-f, f, 1);
-                            enemyHealthIconRect.localScale = new Vector3(f, f, 1);
-                        });
-                    }
 
-                    if (!_cameraZooming)
-                    {
-                        if(currentBeat % 4 == 0)
+                        if (altDance)
                         {
-                            LeanTween.value(uiCamera.gameObject, _defaultZoom-.1f, _defaultZoom,
-                                    beatZoomTime).setOnUpdate(f => { uiCamera.orthographicSize = f; })
-                                .setOnComplete(() => { _cameraZooming = false; });
-                            
-                            LeanTween.value(mainCamera.gameObject, defaultGameZoom-.1f, defaultGameZoom,
-                                    beatZoomTime).setOnUpdate(f => { mainCamera.orthographicSize = f; })
-                                .setOnComplete(() => { _cameraZooming = false; });
+                            girlfriendAnimator.Play("GF Dance Left");
+                            altDance = false;
+                        }
+                        else
+                        {
+                            girlfriendAnimator.Play("GF Dance Right");
+                            altDance = true;
+                        }
+
+                        if (!_portraitsZooming)
+                        {
+                            _portraitsZooming = true;
+                            LeanTween.value(1.25f, 1, .15f).setOnComplete(() => { _portraitsZooming = false; })
+                                .setOnUpdate(f =>
+                                {
+                                    boyfriendHealthIconRect.localScale = new Vector3(-f, f, 1);
+                                    enemyHealthIconRect.localScale = new Vector3(f, f, 1);
+                                });
+                        }
+
+                        if (!_cameraZooming)
+                        {
+                            if (currentBeat % 4 == 0)
+                            {
+                                LeanTween.value(uiCamera.gameObject, _defaultZoom - .1f, _defaultZoom,
+                                        beatZoomTime).setOnUpdate(f => { uiCamera.orthographicSize = f; })
+                                    .setOnComplete(() => { _cameraZooming = false; });
+
+                                LeanTween.value(mainCamera.gameObject, defaultGameZoom - .1f, defaultGameZoom,
+                                        beatZoomTime).setOnUpdate(f => { mainCamera.orthographicSize = f; })
+                                    .setOnComplete(() => { _cameraZooming = false; });
+                            }
                         }
                     }
                 }
@@ -1810,7 +1993,7 @@ public class Song : MonoBehaviour
 
                                 deathBlackout.rectTransform.LeanAlpha(1, 3).setDelay(1).setOnComplete(() =>
                                 {
-                                    PlaySong(false);
+                                    PlaySong(false,difficulty,currentSongMeta.songPath);
                                 });
                             }
                         }
@@ -1847,8 +2030,8 @@ public class Song : MonoBehaviour
                         subtitleDisplayer.StopSubtitles();
                         subtitleDisplayer.paused = false;
 
-                        deadBoyfriend.transform.position = bfObj.transform.position;
-                        deadBoyfriend.transform.localScale = bfObj.transform.localScale;
+                        deadBoyfriend.transform.position = boyfriendObject.transform.position;
+                        deadBoyfriend.transform.localScale = boyfriendObject.transform.localScale;
 
                         deadCamera.orthographicSize = mainCamera.orthographicSize;
                         deadCamera.transform.position = mainCamera.transform.position;
@@ -1912,13 +2095,16 @@ public class Song : MonoBehaviour
             if (!musicSources[0].isPlaying & songStarted & !isDead & !respawning & !Pause.instance.pauseScreen.activeSelf & !Pause.instance.editingVolume)
             {
                 //Song is done.
+                
+                MenuV2.startPhase = MenuV2.StartPhase.SongList;
+                
 
-                modInstance?.Invoke("OnSongDone");
+                LeanTween.cancelAll();
 
                 stopwatch.Stop();
                 beatStopwatch.Stop();
 
-                enemyAnimator.spriteAnimations = defaultEnemy.animations;
+                opponentAnimator.spriteAnimations = defaultEnemy.animations;
 
                 if (usingSubtitles)
                 {
@@ -1930,7 +2116,7 @@ public class Song : MonoBehaviour
 
                 girlfriendAnimator.Play("GF Dance Loop");
                 boyfriendAnimator.Play("BF Idle Loop");
-                enemyAnimator.Play("Idle Loop");
+                opponentAnimator.Play("Idle Loop");
 
 
                 Player.demoMode = false;
@@ -1942,7 +2128,6 @@ public class Song : MonoBehaviour
                     foreach (NoteObject noteObject in noteList.ToList())
                     {
                         noteList.Remove(noteObject);
-                        Destroy(noteObject.gameObject);
                     }
                 }
                 
@@ -1952,9 +2137,15 @@ public class Song : MonoBehaviour
                     foreach (NoteObject noteObject in noteList.ToList())
                     {
                         noteList.Remove(noteObject);
-                        Destroy(noteObject.gameObject);
+                        
                     }
                 }
+                
+                leftNotesPool.ReleaseAll();
+                downNotesPool.ReleaseAll();
+                upNotesPool.ReleaseAll();
+                rightNotesPool.ReleaseAll();
+                holdNotesPool.ReleaseAll();
                 
                 battleCanvas.enabled = false;
                 
@@ -1965,14 +2156,9 @@ public class Song : MonoBehaviour
 
                 
                 menuScreen.SetActive(false);
-                ScreenTransition.instance.StartTransition(menuScreen);
+                SceneManager.LoadScene("Title");
 
-                menuCanvas.enabled = true;
 
-                musicSources[0].clip = menuClip;
-                musicSources[0].loop = true;
-                musicSources[0].volume = Options.menuVolume;
-                musicSources[0].Play();
 
                 
             }
@@ -2080,12 +2266,13 @@ public class Song : MonoBehaviour
 
             }
 
-        if ((enemyAnimator.CurrentAnimation == null || !enemyAnimator.CurrentAnimation.Name.Contains("Idle")) & !songStarted)
+        if (OptionsV2.DesperateMode) return;
+        if ((opponentAnimator.CurrentAnimation == null || !opponentAnimator.CurrentAnimation.Name.Contains("Idle")) & !songStarted)
         {
             _currentEnemyIdleTimer -= Time.deltaTime;
             if (_currentEnemyIdleTimer <= 0)
             {
-                enemyAnimator.Play("Idle Loop");
+                opponentAnimator.Play("Idle Loop");
                 _currentEnemyIdleTimer = enemyIdleTimer;
             }
         }

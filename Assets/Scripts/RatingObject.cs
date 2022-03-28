@@ -12,11 +12,12 @@ public class RatingObject : MonoBehaviour
     // Start is called before the first frame update
     void Start()
     {
-        if(!Options.LiteMode & !isLiteSprite)
+        
+        if(!OptionsV2.LiteMode & !isLiteSprite)
         {
-            LeanTween.moveY(gameObject, transform.position.y - 0.2f, .75f).setOnComplete(() =>
+            gameObject.LeanMoveY(transform.position.y - 0.2f, .75f).setOnComplete(() =>
             {
-                LeanTween.alpha(gameObject, 0, .45f).setDelay(1f).setOnComplete(() => { Destroy(gameObject); });
+                gameObject.LeanAlpha( 0, .45f).setDelay(1f).setOnComplete(() => { Destroy(gameObject); });
             }).setEase(LeanTweenType.easeOutBounce);
         } else if (isLiteSprite)
         {
@@ -27,7 +28,7 @@ public class RatingObject : MonoBehaviour
 
     private void Update()
     {
-        if (!Options.LiteMode) return;
+        if (!OptionsV2.LiteMode) return;
         sprite.enabled = !(liteTimer <= 0);
         liteTimer -= Time.deltaTime;
     }

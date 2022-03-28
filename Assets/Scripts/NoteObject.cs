@@ -20,6 +20,8 @@ public class NoteObject : MonoBehaviour
     public float currentStopwatch;
 
     public float susLength;
+
+    private LTDescr _tween;
     public float ScrollSpeed
     {
         get => _scrollSpeed * 100;
@@ -36,13 +38,13 @@ public class NoteObject : MonoBehaviour
         
     }
 
-    public void GenerateHold(NoteObject prevNote)
+    public void GenerateHold(bool isLastSusNote)
     {
         _sprite = GetComponentInChildren<SpriteRenderer>();
         _song = Song.instance;
         
         var noteTransform = transform;
-        _sprite.flipY = Options.Downscroll;
+        _sprite.flipY = OptionsV2.Downscroll;
 
 
         if (lastSusNote)
@@ -52,12 +54,17 @@ public class NoteObject : MonoBehaviour
                 .44f * -(float) (Song.instance.stepCrochet / 100 * 1.84 * (ScrollSpeed + _song.speedDifference * 100)));
             return;
         }
-        Vector3 oldScale = noteTransform.localScale;
-        oldScale.y *= -(float) (Song.instance.stepCrochet / 100 * 1.84 *   (ScrollSpeed + _song.speedDifference * 100));
+        else
+        {
+            _sprite.drawMode = SpriteDrawMode.Simple;
+            Vector3 oldScale = new Vector3(0.56f,0.56f,1);
+            oldScale.y *= -(float) (Song.instance.stepCrochet / 100 * 1.84 *   (ScrollSpeed + _song.speedDifference * 100));
 
        
         
-        noteTransform.localScale = oldScale;
+            noteTransform.localScale = oldScale;
+
+        }
 
         
         /*if (!prevNote.susNote)
@@ -79,7 +86,7 @@ public class NoteObject : MonoBehaviour
         if (dummyNote)
             return;
 
-        if(Options.Middlescroll)
+        if(OptionsV2.Middlescroll)
         {
             if (Player.playAsEnemy)
             {
@@ -100,20 +107,27 @@ public class NoteObject : MonoBehaviour
                 (0.45f * (_scrollSpeed + Song.instance.speedDifference)));
             if (lastSusNote)
                 oldPos.y += ((float) (Song.instance.stepCrochet / 100 * 1.8 *  (ScrollSpeed + _song.speedDifference * 100)) / 1.76f) * (_scrollSpeed + Song.instance.speedDifference);
-            if (Options.Downscroll)
+            if (OptionsV2.Downscroll)
             {
                 oldPos.y -= 4.45f * 2;
                 oldPos.y = -oldPos.y;
             }
             transform.position = oldPos;
+            
+            _tween ??= gameObject.LeanScale(transform.localScale * 1.10f, .35f).setLoopPingPong();
+
+        }
+        else if(_song.songSetupDone & _song.songStarted)
+        {
+            if (_tween != null)
+            {
+                LeanTween.cancel(_tween.id);
+                _tween = null;
+            }
         }
 
-       
-        
-        Color color;
 
-        if (mustHit) color = _song.player1NoteSprites[type].color;
-        else color = _song.player2NoteSprites[type].color;
+        var color = mustHit ? _song.player1NoteSprites[type].color : _song.player2NoteSprites[type].color;
         
         if (susNote)
             color.a = .75f;
@@ -125,7 +139,7 @@ public class NoteObject : MonoBehaviour
         if (lastSusNote)
             oldPos.y += ((float) (Song.instance.stepCrochet / 100 * 1.85 *  (ScrollSpeed + _song.speedDifference * 100)) / 1.76f) * (_scrollSpeed + Song.instance.speedDifference);
         */
-        if (Options.Downscroll)
+        if (OptionsV2.Downscroll)
         {
             oldPos.y -= 4.45f * 2;
             oldPos.y = -oldPos.y;
@@ -147,7 +161,28 @@ public class NoteObject : MonoBehaviour
                 Song.instance.NoteMiss(this);
                 CameraMovement.instance.focusOnPlayerOne = layer == 1;
                 _song.player2NotesObjects[type].Remove(this);
-                Destroy(gameObject);
+                if (susNote)
+                {
+                    _song.holdNotesPool.Release(gameObject);
+                } else
+                {
+
+                    switch (type)
+                    {
+                        case 0:
+                            _song.leftNotesPool.Release(gameObject);
+                            break;
+                        case 1:
+                            _song.downNotesPool.Release(gameObject);
+                            break;
+                        case 2:
+                            _song.upNotesPool.Release(gameObject);
+                            break;
+                        case 3:
+                            _song.rightNotesPool.Release(gameObject);
+                            break;
+                    }
+                }
             }
             else
             {
@@ -190,7 +225,28 @@ public class NoteObject : MonoBehaviour
                 Song.instance.NoteMiss(this);
                 CameraMovement.instance.focusOnPlayerOne = layer == 1;
                 _song.player1NotesObjects[type].Remove(this);
-                Destroy(gameObject);
+                if (susNote)
+                {
+                    _song.holdNotesPool.Release(gameObject);
+                } else
+                {
+
+                    switch (type)
+                    {
+                        case 0:
+                            _song.leftNotesPool.Release(gameObject);
+                            break;
+                        case 1:
+                            _song.downNotesPool.Release(gameObject);
+                            break;
+                        case 2:
+                            _song.upNotesPool.Release(gameObject);
+                            break;
+                        case 3:
+                            _song.rightNotesPool.Release(gameObject);
+                            break;
+                    }
+                }
             }
             else
             {
