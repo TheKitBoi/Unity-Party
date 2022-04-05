@@ -1,4 +1,4 @@
-**Unity Party** is an FNF' engine created using the Unity game engine focused on allowing lower-end PCs to play FNF'.
+**Unity Party** is an FNF' engine created using the Unity game engine focused on allowing lower-end PCs to play FNF.
 
 ## Note Worthy Features
 ### High FPS
