@@ -11,8 +11,8 @@ TagManager:
   - 
   - Water
   - UI
-  - 
-  - 
+  - Metronome
+  - Character
   - Notes
   - Dead
   - Gameplay UI
@@ -40,6 +40,9 @@ TagManager:
   m_SortingLayers:
   - name: Default
     uniqueID: 0
+    locked: 0
+  - name: Character
+    uniqueID: 1441061245
     locked: 0
   - name: Rating
     uniqueID: 3823794925
