@@ -76,9 +76,11 @@ public class Song : MonoBehaviour
     public Stopwatch beatStopwatch;
     [Space] public Camera mainCamera;
     public Camera uiCamera;
-    public float beatZoomTime;
+    public float cameraBopLerpSpeed;
+    public float portraitBopLerpSpeed;
     private float _defaultZoom;
     public float defaultGameZoom;
+    
 
     [Space, TextArea(2, 12)] public string jsonDir;
     public float notesOffset;
@@ -259,6 +261,12 @@ public class Song : MonoBehaviour
 
         mainCamera = Camera.main;
         
+        
+        /*
+        * Initialize LeanTween
+        */
+        
+       LeanTween.init(9999);
         
         /*
          * Grabs the subtitle displayer.
@@ -721,15 +729,55 @@ public class Song : MonoBehaviour
                 rect.anchoredPosition = new Vector3(0,-165,0);
             }
         }
-        
-        
+
+
         /*
          * If the player 2 in the chart exists in this engine,
          * we'll change player 2 to the correct character.
          *
          * If not, keep any existing character we selected.
          */
-        if(!OptionsV2.DesperateMode)
+        if (!OptionsV2.DesperateMode)
+        {
+            LoadOpponent();
+            LoadScene();
+        }
+
+        
+
+        if (isDead)
+        {
+            isDead = false;
+            respawning = false;
+
+            deadCamera.enabled = false;
+
+            
+        }
+        if(OptionsV2.SongDuration)
+        {
+            float time = musicClip.length - musicSources[0].time;
+
+            int seconds = (int) (time % 60); // return the remainder of the seconds divide by 60 as an int
+            time /= 60; // divide current time y 60 to get minutes
+            int minutes = (int) (time % 60); //return the remainder of the minutes divide by 60 as an int
+
+            songDurationText.text = minutes + ":" + seconds.ToString("00");
+
+            songDurationBar.fillAmount = 0;
+        }
+
+        mainCamera.enabled = true;
+        uiCamera.enabled = true;
+        /*
+         * Now we can fully start the song in a coroutine.
+         */
+        StartCoroutine(nameof(SongStart), startSound.length);
+    }
+
+    void LoadOpponent()
+    {
+        if (!OptionsV2.DesperateMode)
         {
             print("Checking for and applying " + _song.Player2 + ". Result is " +
                   Cache.cachedOpponents.ContainsKey(_song.Player2));
@@ -810,7 +858,6 @@ public class Song : MonoBehaviour
                             var sprite = Sprite.Create(imageTexture,
                                 new Rect(0, 0, imageTexture.width, imageTexture.height), new Vector2(0.5f, 0.0f), 100);
                             sprites.Add(sprite);
-
                         }
 
                         CharacterAnimations.Add(directoryInfo.Name, sprites);
@@ -852,7 +899,6 @@ public class Song : MonoBehaviour
                         newAnimation.SpriteAnimationType = SpriteAnimationType.PlayOnce;
 
                         opponentAnimator.spriteAnimations.Add(newAnimation);
-
                     }
 
                     Character newCharacter = ScriptableObject.CreateInstance<Character>();
@@ -894,7 +940,7 @@ public class Song : MonoBehaviour
                     enemyHealthIconRect.sizeDelta = enemy.portraitSize;
                     enemyHealthBar.color = enemy.healthColor;
                     playerTwoCornerImage.color = enemy.healthColor;
-                    
+
 
                     Vector3 offset = enemy.cameraOffset;
                     offset.z = -10;
@@ -906,139 +952,78 @@ public class Song : MonoBehaviour
                     newCharacter.animations = opponentAnimator.spriteAnimations;
                     Cache.cachedOpponents.Add(_song.Player2, newCharacter);
 
-                    /*
-                    if (charactersDictionary.ContainsKey(currentMeta.Character.name))
-                    {
-                        enemy = charactersDictionary[currentMeta.Character.name];
-                        enemyAnimator.spriteAnimations = enemy.animations;
-                        
-                        enemy.doesFloat)
-                        {
-                            _enemyFloat = LeanTween.moveLocalY(enemyObj, enemy.floatToOffset, enemy.floatSpeed).setEaseInOutExpo()
-                                .setLoopPingPong();
-                        }
-                        else
-                        {
-                             
-                            if (_enemyFloat != null && LeanTween.isTweening(_enemyFloat.id))
-                            {
-                                LeanTween.cancel(_enemyFloat.id);
-                                enemyObj.transform.position = _enemyDefaultPos;
-                            }
-                        }
-    
-                        enemyHealthIcon.sprite = enemy.portrait;
-                        enemyHealthIconRect.sizeDelta = enemy.portraitSize;
-    
-                        CameraMovement.instance.playerTwoOffset = enemy.cameraOffset;
-                    } 
-                    else
-                    {
-    
-                        
-                    }
-                    */
-                }
-            }
-            string sceneDir = selectedSongDir + "/Scene";
-            if (Directory.Exists(sceneDir))
-            {
-                SceneData data = JsonConvert.DeserializeObject<SceneData>(File.ReadAllText(sceneDir + "/scene.json"));
-
-                if (data != null)
-                {
-                    if(!Cache.cachedScenes.ContainsKey(data.sceneName))
-                    {
-                        string imagesDirectory = sceneDir + "/images";
-                        if (Directory.Exists(imagesDirectory))
-                        {
-                            Dictionary<SceneObject, Sprite> sprites = new Dictionary<SceneObject, Sprite>();
-                            foreach (SceneObject sceneObject in data.objects)
-                            {
-                                string path = imagesDirectory + "/" + sceneObject.fileName;
-                                if (File.Exists(path))
-                                {
-                                    byte[] imageData = File.ReadAllBytes(path);
-
-
-                                    Texture2D imageTexture = new Texture2D(2, 2);
-                                    imageTexture.LoadImage(imageData);
-
-                                    GameObject newImage = new GameObject();
-                                    SpriteRenderer renderer = newImage.AddComponent<SpriteRenderer>();
-                                    Sprite newSprite = Sprite.Create(imageTexture,
-                                        new Rect(0, 0, imageTexture.width, imageTexture.height), Vector2.zero, 100);
-                                    renderer.sprite = newSprite;
-                                    renderer.sortingOrder = sceneObject.layer;
-                                    newImage.name = Path.GetFileName(path);
-
-                                    newImage.transform.position = sceneObject.position;
-                                    newImage.transform.localScale = sceneObject.size;
-                                    newImage.transform.rotation = sceneObject.rotation;
-
-                                    sprites.Add(sceneObject, newSprite);
-                                }
-                            }
-
-                            Cache.cachedScenes.Add(data.sceneName, sprites);
-                        }
-                    }
-                    else
-                    {
-                        Dictionary<SceneObject, Sprite> sceneObjectsCache = Cache.cachedScenes[data.sceneName];
-
-                        foreach (SceneObject sceneObject in sceneObjectsCache.Keys)
-                        {
-                            GameObject newImage = new GameObject();
-                            SpriteRenderer renderer = newImage.AddComponent<SpriteRenderer>();
-                            renderer.sprite = sceneObjectsCache[sceneObject];
-                            renderer.sortingOrder = sceneObject.layer;
-                            newImage.name = sceneObject.fileName;
-
-                            newImage.transform.position = sceneObject.position;
-                            newImage.transform.localScale = sceneObject.size;
-                            newImage.transform.rotation = sceneObject.rotation;
-                        }
-                    }
-
-                    foreach (GameObject sceneObject in defaultSceneObjects) Destroy(sceneObject);
                 }
             }
         }
-
-        
-
-        if (isDead)
-        {
-            isDead = false;
-            respawning = false;
-
-            deadCamera.enabled = false;
-
-            
-        }
-        if(OptionsV2.SongDuration)
-        {
-            float time = musicClip.length - musicSources[0].time;
-
-            int seconds = (int) (time % 60); // return the remainder of the seconds divide by 60 as an int
-            time /= 60; // divide current time y 60 to get minutes
-            int minutes = (int) (time % 60); //return the remainder of the minutes divide by 60 as an int
-
-            songDurationText.text = minutes + ":" + seconds.ToString("00");
-
-            songDurationBar.fillAmount = 0;
-        }
-
-        mainCamera.enabled = true;
-        uiCamera.enabled = true;
-        /*
-         * Now we can fully start the song in a coroutine.
-         */
-        StartCoroutine(nameof(SongStart), startSound.length);
     }
 
-    
+    void LoadScene()
+    {
+        string sceneDir = selectedSongDir + "/Scene";
+        if (Directory.Exists(sceneDir))
+        {
+            SceneData data = JsonConvert.DeserializeObject<SceneData>(File.ReadAllText(sceneDir + "/scene.json"));
+
+            if (data != null)
+            {
+                if (!Cache.cachedScenes.ContainsKey(data.sceneName))
+                {
+                    string imagesDirectory = sceneDir + "/images";
+                    if (Directory.Exists(imagesDirectory))
+                    {
+                        Dictionary<SceneObject, Sprite> sprites = new Dictionary<SceneObject, Sprite>();
+                        foreach (SceneObject sceneObject in data.objects)
+                        {
+                            string path = imagesDirectory + "/" + sceneObject.fileName;
+                            if (File.Exists(path))
+                            {
+                                byte[] imageData = File.ReadAllBytes(path);
+
+
+                                Texture2D imageTexture = new Texture2D(2, 2);
+                                imageTexture.LoadImage(imageData);
+
+                                GameObject newImage = new GameObject();
+                                SpriteRenderer renderer = newImage.AddComponent<SpriteRenderer>();
+                                Sprite newSprite = Sprite.Create(imageTexture,
+                                    new Rect(0, 0, imageTexture.width, imageTexture.height), Vector2.zero, 100);
+                                renderer.sprite = newSprite;
+                                renderer.sortingOrder = sceneObject.layer;
+                                newImage.name = Path.GetFileName(path);
+
+                                newImage.transform.position = sceneObject.position;
+                                newImage.transform.localScale = sceneObject.size;
+                                newImage.transform.rotation = sceneObject.rotation;
+
+                                sprites.Add(sceneObject, newSprite);
+                            }
+                        }
+
+                        Cache.cachedScenes.Add(data.sceneName, sprites);
+                    }
+                }
+                else
+                {
+                    Dictionary<SceneObject, Sprite> sceneObjectsCache = Cache.cachedScenes[data.sceneName];
+
+                    foreach (SceneObject sceneObject in sceneObjectsCache.Keys)
+                    {
+                        GameObject newImage = new GameObject();
+                        SpriteRenderer renderer = newImage.AddComponent<SpriteRenderer>();
+                        renderer.sprite = sceneObjectsCache[sceneObject];
+                        renderer.sortingOrder = sceneObject.layer;
+                        newImage.name = sceneObject.fileName;
+
+                        newImage.transform.position = sceneObject.position;
+                        newImage.transform.localScale = sceneObject.size;
+                        newImage.transform.rotation = sceneObject.rotation;
+                    }
+                }
+
+                foreach (GameObject sceneObject in defaultSceneObjects) Destroy(sceneObject);
+            }
+        }
+    }
     
     IEnumerator SongStart(float delay)
     {
@@ -1057,7 +1042,9 @@ public class Song : MonoBehaviour
         startSongTooltip.GetComponentInChildren<TMP_Text>().text = $"Press {Player.keybinds.startSongKeyCode} to start the song.";
 
         LoadingTransition.instance.Hide();
-        
+
+        DiscordController.instance.EnableGameStateLoop = true;
+
         yield return new WaitUntil(() => Input.GetKeyDown(Player.keybinds.startSongKeyCode));
         startSongTooltip.SetActive(false);
         /*
@@ -1466,7 +1453,7 @@ public class Song : MonoBehaviour
         
         if (!Player.playAsEnemy || Player.twoPlayers || Player.demoMode)
         {
-            /*
+            
             float accuracyPercent;
             if(playerOneStats.totalNoteHits != 0)
             {
@@ -1488,9 +1475,9 @@ public class Song : MonoBehaviour
             }
 
             playerOneScoringText.text =
-                $"Score: {playerOneStats.currentScore}\nAccuracy: {accuracyPercent}%\nCombo: {playerOneStats.currentCombo} ({playerOneStats.highestCombo})\nMisses: {playerOneStats.missedHits}";
-        */
-            playerOneScoringText.text = playerOneStats.currentScore.ToString("00000000");
+                $"Score: {playerOneStats.currentScore}\nAccuracy: {accuracyPercent.ToString("0.00")}%\nMisses: {playerOneStats.missedHits}";
+        
+            //playerOneScoringText.text = playerOneStats.currentScore.ToString("00000000");
         }
         else
         {
@@ -1499,7 +1486,7 @@ public class Song : MonoBehaviour
 
         if (Player.playAsEnemy || Player.twoPlayers || Player.demoMode)
         {
-            /*
+            
             float accuracyPercent;
             if(playerTwoStats.totalNoteHits != 0)
             {
@@ -1521,9 +1508,9 @@ public class Song : MonoBehaviour
             }
 
             playerTwoScoringText.text =
-                $"Score: {playerTwoStats.currentScore}\nAccuracy: {accuracyPercent}%\nCombo: {playerTwoStats.currentCombo} ({playerTwoStats.highestCombo})\nMisses: {playerTwoStats.missedHits}";
-        */
-            playerTwoScoringText.text = playerTwoStats.currentScore.ToString("00000000");
+                $"Score: {playerTwoStats.currentScore}\nAccuracy: {accuracyPercent}%\nMisses: {playerTwoStats.missedHits}";
+        
+            //playerTwoScoringText.text = playerTwoStats.currentScore.ToString("00000000");
 
         }
         else
@@ -1623,33 +1610,15 @@ public class Song : MonoBehaviour
 
             float yPos = note.transform.position.y;
 
-            var newRatingObject = !OptionsV2.LiteMode ? Instantiate(ratingObject) : liteRatingObjectP1;
-            Vector3 ratingPos = new Vector3(1, 1, 0);
-            newRatingObject.transform.position = ratingPos;
-            if (OptionsV2.LiteMode & player == 2)
-            {
-                newRatingObject = liteRatingObjectP2;
-                ratingPos = newRatingObject.transform.position;
-            }
+            var newRatingObject = player == 1 ? liteRatingObjectP1 : liteRatingObjectP2;
+            Vector3 ratingPos = newRatingObject.transform.position;
             
             ratingPos.y = OptionsV2.Downscroll ? 6 : 1;
-            if (player == 2)
-            {
-                
-                if (!OptionsV2.LiteMode)
-                {
-                    ratingPos.x = -ratingPos.x;
-                }
-            }
             
             newRatingObject.transform.position = ratingPos;
 
             var ratingObjectScript = newRatingObject.GetComponent<RatingObject>();
 
-            if (OptionsV2.LiteMode)
-            {
-                ratingObjectScript.liteTimer = 2.15f;
-            }
             
 
             /*
@@ -1768,6 +1737,7 @@ public class Song : MonoBehaviour
                     }
                     break;
             }
+            ratingObjectScript.ShowRating();
             
             if (player == 1)
             {
@@ -1792,10 +1762,7 @@ public class Song : MonoBehaviour
                         playerOneComboText.alpha = value;
                     });
 
-                if (playerOneScoreTween != null)
-                {
-                    LeanTween.cancel(playerOneScoreTween.id);
-                }
+                
 
                 playerOneScoreTween = LeanTween.value(playerOneScoringText.gameObject, new Vector3(1.2f, 1.2f, 1.2f),
                     new Vector3(1f, 1f, 1f), .25f).setOnUpdate(
@@ -2044,39 +2011,35 @@ public class Song : MonoBehaviour
                             girlfriendAnimator.Play("GF Dance Right");
                             altDance = true;
                         }
+                        
+                        boyfriendHealthIconRect.localScale = new Vector3(-1.25f, 1.25f, 1);
+                        enemyHealthIconRect.localScale = new Vector3(1.25f, 1.25f, 1);
 
-                        if (!_portraitsZooming)
+                        if (currentBeat % 4 == 0)
                         {
-                            _portraitsZooming = true;
-                            LeanTween.value(1.25f, 1, .15f).setOnComplete(() => { _portraitsZooming = false; })
-                                .setOnUpdate(f =>
-                                {
-                                    boyfriendHealthIconRect.localScale = new Vector3(-f, f, 1);
-                                    enemyHealthIconRect.localScale = new Vector3(f, f, 1);
-                                });
-                        }
-
-                        if (!_cameraZooming)
-                        {
-                            if (currentBeat % 4 == 0)
-                            {
-                                LeanTween.value(uiCamera.gameObject, _defaultZoom - .1f, _defaultZoom,
-                                        beatZoomTime).setOnUpdate(f => { uiCamera.orthographicSize = f; })
-                                    .setOnComplete(() => { _cameraZooming = false; });
-
-                                LeanTween.value(mainCamera.gameObject, defaultGameZoom - .1f, defaultGameZoom,
-                                        beatZoomTime).setOnUpdate(f => { mainCamera.orthographicSize = f; })
-                                    .setOnComplete(() => { _cameraZooming = false; });
-                            }
+                            mainCamera.orthographicSize = defaultGameZoom - .1f;
+                            uiCamera.orthographicSize = _defaultZoom - .1f;
                         }
                     }
                 }
+
+                boyfriendHealthIconRect.localScale =
+                    Vector3.Lerp(boyfriendHealthIconRect.localScale, new Vector3(-1, 1, 1),portraitBopLerpSpeed);
+                enemyHealthIconRect.localScale = 
+                    Vector3.Lerp(enemyHealthIconRect.localScale, new Vector3(1, 1, 1),portraitBopLerpSpeed);
+
+                mainCamera.orthographicSize = Mathf.Lerp(mainCamera.orthographicSize, defaultGameZoom,cameraBopLerpSpeed);
+                uiCamera.orthographicSize = Mathf.Lerp(uiCamera.orthographicSize, _defaultZoom, cameraBopLerpSpeed);
             }
             else if (!songStarted & !musicSources[0].isPlaying)
             {
                 if (Input.GetKeyDown(Player.keybinds.pauseKeyCode))
                 {
-                    LoadingTransition.instance.Show(() => SceneManager.LoadScene("Title"));
+                    LoadingTransition.instance.Show(() =>
+                    {
+                        SceneManager.LoadScene("Title");
+                        DiscordController.instance.EnableGameStateLoop = false;
+                    });
                 }
             }
             
@@ -2101,16 +2064,24 @@ public class Song : MonoBehaviour
 
                                 musicSources[0].PlayOneShot(deadConfirm);
 
-                                deathBlackout.rectTransform.LeanAlpha(1, 3).setDelay(1).setOnComplete(() =>
+                                deathBlackout.rectTransform.LeanAlpha(1, 1.8f).setDelay(1).setOnComplete(() =>
                                 {
-                                    LoadingTransition.instance.Show(() => SceneManager.LoadScene("Game_Backup3"));
+                                    LoadingTransition.instance.Show(() =>
+                                    {
+                                        SceneManager.LoadScene("Game_Backup3");
+                                        DiscordController.instance.EnableGameStateLoop = false;
+                                    });
                                 });
                             } else if (Input.GetKeyDown(KeyCode.Escape))
                             {
                                 musicSources[0].Stop();
                                 respawning = true;
 
-                                LoadingTransition.instance.Show(() => SceneManager.LoadScene("Title"));
+                                LoadingTransition.instance.Show(() =>
+                                {
+                                    SceneManager.LoadScene("Title");
+                                    DiscordController.instance.EnableGameStateLoop = false;
+                                });
                             }
                         }
                     }
@@ -2304,7 +2275,11 @@ public class Song : MonoBehaviour
                     PlayerPrefs.Save();
                 }
                 
-                LoadingTransition.instance.Show(() => { SceneManager.LoadScene("Title"); });
+                LoadingTransition.instance.Show(() => 
+                { 
+                    SceneManager.LoadScene("Title");
+                    DiscordController.instance.EnableGameStateLoop = false; 
+                });
 
 
 
